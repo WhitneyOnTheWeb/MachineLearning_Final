@@ -11,6 +11,7 @@ from time import time
 import pprint
 from feature_format import featureFormat, targetFeatureSplit
 from tester import test_classifier, dump_classifier_and_data
+from wk_functions import check_for_outliers_95, check_for_outliers_name, check_for_outliers_NaNs, xval_classifier, best_features
 from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score
 from sklearn.cross_validation import train_test_split, StratifiedShuffleSplit
@@ -18,19 +19,29 @@ from sklearn.grid_search import GridSearchCV
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import SelectKBest, f_classif
 
+import warnings
+warnings.filterwarnings("ignore")
+
 ### Task 1: Select what features you'll use.
 ### features_list is a list of strings, each of which is a feature name.
 ### The first feature must be "poi".
 
+##Shortened list of features to important ones based on findings from previously running the script
 poi_label = ['poi']
+#financial_features = ['salary', 'total_payments', 'loan_advances', 'bonus',
+#                      'deferred_income', 'total_stock_value',
+#                      'expenses', 'exercised_stock_options', 'long_term_incentive',
+#                      'restricted_stock']
+                      # Removed other
+#email_features = ['from_poi_to_this_person', 'shared_receipt_with_poi'] 
+                  # Removed email_address
+				  
 financial_features = ['salary', 'deferral_payments', 'total_payments', 'loan_advances', 'bonus',
                       'restricted_stock_deferred', 'deferred_income', 'total_stock_value',
                       'expenses', 'exercised_stock_options', 'long_term_incentive',
                       'restricted_stock', 'director_fees']
-                      # Removed other
 email_features = ['to_messages', 'from_poi_to_this_person', 'from_messages',
-                  'from_this_person_to_poi', 'shared_receipt_with_poi'] 
-                  # Removed email_address
+                  'from_this_person_to_poi', 'shared_receipt_with_poi']
 
 #financial_features = ['salary', 'deferral_payments']
 #email_features = ['to_messages', 'from_poi_to_this_person']
@@ -40,11 +51,12 @@ def line():
 
 line()
 features_list = poi_label + financial_features + email_features
-print('Total Starting Features:', len(features_list) - 1) # Minus 1 to account for POI label
+print('Total Starting Features:', len(features_list))
 
 ### Load the dictionary containing the dataset
 with open("final_project/final_project_dataset.pkl", "rb") as data_file:
     data_dict = pickle.load(data_file)
+    #data_dict = pd.DataFrame(data_dict)
 print('Total Data Points:', len(data_dict))
 
 NaNs = [0 for i in range(len(features_list))]
@@ -52,57 +64,43 @@ for i, person in enumerate(data_dict.values()):
     for j, feature in enumerate(features_list):
         if person[feature] == 'NaN':
             NaNs[j] += 1
-line()
+line() # Check for NaNs in each feature
 print('# NaNs in Each Feature:')
 for i, feature in enumerate(features_list):
     print(feature + ': ', NaNs[i])
 
 ### Task 2: Remove outliers
-# Check for NaNs in each feature
-def check_for_outliers(f1, f2):
-    f_list = []
-    f_95 = []
-    f1_95 = []
-    f2_95 = []
-
-    # Get list of persons with values from the two specified financial features
-    for key, value in data_dict.items():
-        f_list.append([key, value[f1], value[f2]])
-
-    # Get rid of any entries that have NaN for one or both features, since these are not outliers
-    for i in f_list:
-        if i[1] != 'NaN' and i[2] != 'NaN':
-            f_95.append(i)
-
-    # Test if values for both features fall into the 95th percentile, and if they do, print
-    #the name of the person
-    for i in f_95:
-        f1_95.append(float(i[1]))
-        f2_95.append(float(i[2]))
-    f1_95 = float(np.percentile(f1_95, 95))
-    f2_95 = float(np.percentile(f2_95, 95))
-
-    for key, value in data_dict.items():
-        if value[f1] != 'NaN' and value[f2] != 'NaN':
-            if float(value[f1]) >= f1_95 and float(value[f2]) >= f2_95:
-                print(key, value[f1], value[f2])
 line()
 print('95% Percentile Financial Feature Values')
 line()
 print('salary/bonus:')
-check_for_outliers('bonus', 'salary')
+check_for_outliers_95('bonus', 'salary', data_dict)
     #   LAY KENNETH L 7000000 1072321
     #   SKILLING JEFFREY K 5600000 1111258
     #   TOTAL 97343619 26704229
 line()
 print('exercised stock options/long term incentive:')
-check_for_outliers('exercised_stock_options', 'long_term_incentive')
+check_for_outliers_95('exercised_stock_options', 'long_term_incentive', data_dict)
     #   LAY KENNETH L 34348384 3600000
     #   TOTAL 311764000 48521928
 line()
 print('TOTAL is an outlier that sums the rest of the data')
 print('It should be removed from the dataset')
 data_dict.pop('TOTAL')
+
+line()
+print('Check employee names:')
+check_for_outliers_name(data_dict)
+line()
+print('THE TRAVEL AGENCY IN THE PARK is not an employee, and should be removed from the list')
+data_dict.pop('THE TRAVEL AGENCY IN THE PARK')
+
+line()
+check_for_outliers_NaNs(data_dict, features_list)
+print('LOCKHART EUGENE E has only NaN values, so he should be removed from the list')
+data_dict.pop('LOCKHART EUGENE E')
+
+line()
 print('Updated Total Data Points:', len(data_dict))
 line()
 
@@ -120,10 +118,12 @@ line()
 ### Store to my_dataset for easy export below.
 my_dataset = data_dict
 
+#### Comment out below section to score classifiers without the new features
 ## Create new features: to_poi_ratio and from_poi_ratio
 for person in my_dataset.values():
     person['to_poi_ratio'] = 0
     person['from_poi_ratio'] = 0
+    person['blank'] = 0
     if float(person['from_messages']) > 0:
         person['to_poi_ratio'] = \
             float(person['from_this_person_to_poi']) / float(person['from_messages'])
@@ -131,16 +131,22 @@ for person in my_dataset.values():
         person['from_poi_ratio'] = \
             float(person['from_poi_to_this_person']) / float(person['to_messages'])
 
-features_list.extend(['to_poi_ratio', 'from_poi_ratio'])
+features_list.extend(['to_poi_ratio', 'from_poi_ratio', 'blank'])
 print(features_list)
 print('New features created: to_poi_ratio, from_poi_ratio')
+print('These features calculate the ratio of emails to or from POIs out')
+print('of total sent or received')
+line()
+print('to_poi_ratio: from_this_person_to_poi / from_messages')
+print('from_poi_ratio: from_poi_to_this_person / to_messages')
+print('Features list was updated with to_poi_ratio')
 print('Updated Total Features:', len(features_list) - 1)
 line()
+#### End comment section
 
 ### Extract features and labels from dataset for local testing
 data = featureFormat(my_dataset, features_list, sort_keys = True)
 labels, features = targetFeatureSplit(data)
-splits = len(labels) - 1
 
 ## Use StratifiedShuffleSplit() to try to identify best features for the model
 sss = StratifiedShuffleSplit(labels, 1000, random_state = 666)
@@ -227,7 +233,7 @@ for i in range(len(features[0])):
     ada_recall.append(round(float(re), 2))
 
     # Run metrics on Random Forest Classifier
-    rf = RandomForestClassifier(random_state = 666)
+    rf = RandomForestClassifier(random_state = 777)
     acc, prec, re = xval_classifier(rf, reduced_features, labels, sss)
     rf_accuracy.append(round(float(acc), 2))
     rf_precision.append(round(float(prec), 2))
@@ -285,14 +291,14 @@ rf_df = pd.DataFrame({'rf_accuracy': rf_accuracy, 'rf_precision': rf_precision,
         'rf_recall': rf_recall})
 ada_df.plot()
 rf_df.plot()
-plt.show()
+#plt.show()
+#Hide plots
+
 print('When comparing AdaBoost to RandomForest, AdaBoost has a  higher average recall,')
 print('and a more stable (but lower) precison.')
 print('RandomForest has a higher average precision, with more variation, and a slightly ')
 print('higher accuracy.')
 print('It appears that overall RandomForest is doing a bit of a better job than AdaBoost.')
-print('However, AdaBoost having a higher recall will help ensure both precision and recall')
-print('are above .3 when tuned.')
 
 line()
 # Use SelectKBest to score and identify the best features in each classifier
@@ -303,17 +309,8 @@ max_ada_precision = ada_precision.index(max(ada_precision)) + 1
 max_rf_recall = rf_recall.index(max(rf_recall)) + 1
 max_rf_precision = rf_precision.index(max(rf_precision)) + 1
 
-def best_features(max_feature):
-    sel = SelectKBest(f_classif, k = max_feature)
-    sel.fit(features, labels)
-    stop = np.sort(sel.scores_)[::-1][max_feature]
-    selected_features_list = [f for i, f in enumerate(features_list[1:]) if sel.scores_[i] >= stop]
-    selected_features_list = ['poi'] + selected_features_list 
-    selected_features = sel.fit_transform(features, labels)
-    return selected_features_list, selected_features
-
-bfl_ada_recall, bf_ada_recall = best_features(max_ada_recall)
-bfl_rf_recall, bf_rf_recall = best_features(max_rf_recall)
+bfl_ada_recall, bf_ada_recall = best_features(max_ada_recall, features, labels, features_list)
+bfl_rf_recall, bf_rf_recall = best_features(max_rf_recall, features, labels, features_list)
 
 print('Number of Ada Recall Best Features', len(bfl_ada_recall) - 1)
 print('Number of RF Recall Best Features:', len(bfl_rf_recall) - 1)
@@ -325,7 +322,7 @@ for f in bfl_ada_recall[1:]:
     print(f + ' with a score of: {0}'.format(round(sel.scores_[bfl_ada_recall[1:].index(f)], 2)))
 line()
 
-RF = RandomForestClassifier(random_state = 666)
+RF = RandomForestClassifier(random_state = 777)
 RF.fit(bf_rf_recall, labels)
 print('RF Feature Importance:')
 print(RF.feature_importances_)
@@ -334,8 +331,7 @@ print('Best Features - RF:')
 for f in bfl_rf_recall[1:]:
     print(f + ' with a score of: {0}'.format(round(sel.scores_[bfl_rf_recall[1:].index(f)], 2)))
 line()
-print('With the best classifier, AdaBoost, there are 13 best features we can examine/tune.')
-print('Of those best features, restricted_stock and with are the top 2.')
+print('With AdaBoost and RandomForest, there are 3 best features we can examine/tune.')
 print('Precision for both classifiers is already over .3, however, RandomForest has a much')
 print('lower average recall')
 
@@ -348,7 +344,7 @@ print('lower average recall')
 
 t = time()
 #ada_tuning_parametrers = {'n_estimators': [70], 'learning_rate': [.6]}
-ada_tuning_parametrers = {'n_estimators': [60, 70, 80, 90, 100], 
+ada_tuning_parametrers = {'n_estimators': [70, 80, 90, 100], 
                           'learning_rate': [.4, .6, 1]}
 print('Beginning tuning AdaBoost...')
 print('Please wait...')
@@ -368,7 +364,7 @@ test_classifier(ada_clf, my_dataset, bfl_ada_recall, folds = 1000)
 line()
 t = time()
 #rf_tuning_parameters = {'n_estimators': [90], 'min_samples_split': [3], 'max_features': [1]}
-rf_tuning_parameters = {'n_estimators': [70, 80, 90, 100, 125, 150], 
+rf_tuning_parameters = {'n_estimators': [80, 90, 100, 125], 
                         'min_samples_split': [2, 4, 6], 'max_features': [1, 2, 3]}
 print('Beginning tuning RandomForest...')
 print('Please wait...')
@@ -388,4 +384,5 @@ test_classifier(rf_clf, my_dataset, bfl_rf_recall, folds = 1000)
 ### that the version of poi_id.py that you submit can be run on its own and
 ### generates the necessary .pkl files for validating your results.
 
-dump_classifier_and_data(ada_clf, my_dataset, bfl_ada_recall)
+#Dump Randomforest 
+dump_classifier_and_data(rf_clf, my_dataset, bfl_rf_recall)
