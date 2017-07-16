@@ -11,7 +11,7 @@ from time import time
 import pprint
 from feature_format import featureFormat, targetFeatureSplit
 from tester import test_classifier, dump_classifier_and_data
-from wk_functions import check_for_outliers_95, check_for_outliers_name, check_for_outliers_NaNs, xval_classifier, best_features
+from wk_functions import check_for_outliers_95, check_for_outliers_name, check_for_outliers_NaNs, xval_classifier, best_features, tune_RandomForest, tune_AdaBoost, line
 from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score
 from sklearn.cross_validation import train_test_split, StratifiedShuffleSplit
@@ -45,9 +45,6 @@ email_features = ['to_messages', 'from_poi_to_this_person', 'from_messages',
 
 #financial_features = ['salary', 'deferral_payments']
 #email_features = ['to_messages', 'from_poi_to_this_person']
-
-def line():
-    print('-'*80)
 
 line()
 features_list = poi_label + financial_features + email_features
@@ -160,48 +157,6 @@ line()
 
 # Assign variables for classifier comparisons, these were taken from the suggestions in
 # the choose_your_own algorithm project: AdaBoost and Random Forest
-
-def xval_classifier(clf, features, labels, cv):
-    # Compare classifiers using cross validation
-    tn = 0
-    fn = 0
-    tp = 0
-    fp = 0
-
-    for train_index, test_index in cv: 
-        features_train = []
-        features_test  = []
-        labels_train   = []
-        labels_test    = []
-
-        for i in train_index:
-            features_train.append(features[i])
-            labels_train.append(labels[i])
-        for j in test_index:
-            features_test.append(features[j])
-            labels_test.append(labels[j])
-        clf.fit(features_train, labels_train)
-        preds = clf.predict(features_test)
-
-        for pred, actual in zip(preds, labels_test):
-            if pred == 0 and actual == 0:
-                tn += 1
-            elif pred == 0 and actual == 1:
-                fn += 1
-            elif pred == 1 and actual == 0:
-                fp += 1
-            elif pred == 1 and actual == 1:
-                tp += 1
-
-        pred_count = tn + fn + fp + tp
-        #print(pred_count)
-
-        if tp > 0:
-            acc = round(np.float64(tp + tn) / pred_count, 2)
-            prec = round(np.float64(tp) / (tp + fp), 2)
-            re = round(np.float64(tp) / (tp + fn), 2)
-
-    return acc, prec, re
 
 print('Begin training AdaBoost and RandomForest Classifiers...')
 print('Please wait...')
@@ -341,41 +296,20 @@ print('lower average recall')
 ### function. Because of the small size of the dataset, the script uses
 ### stratified shuffle split cross validation. For more info: 
 ### http://scikit-learn.org/stable/modules/generated/sklearn.cross_validation.StratifiedShuffleSplit.html
-
-t = time()
+#rf_tuning_parameters = {'n_estimators': [90], 'min_samples_split': [3], 'max_features': [1]}
+rf_tuning_parameters = {'n_estimators': [125], 
+                        'min_samples_split': [2], 'max_features': [3]}
 #ada_tuning_parametrers = {'n_estimators': [70], 'learning_rate': [.6]}
-ada_tuning_parametrers = {'n_estimators': [70, 80, 90, 100], 
-                          'learning_rate': [.4, .6, 1]}
-print('Beginning tuning AdaBoost...')
-print('Please wait...')
-ADA = GridSearchCV(AdaBoostClassifier(), ada_tuning_parametrers, cv = sss, scoring = 'recall')
-ADA.fit(bf_ada_recall, labels)
-print('Best Parameters:')
-print(ADA.best_params_)
-print('Time Spent Tuning AdaBoost: {0}s'.format(round(time() - t, 2)))
+ada_tuning_parameters = {'n_estimators': [100],
+                        'learning_rate': [1]}
 
-ada_clf = ADA.best_estimator_
-print('Tuned AdaBoost Metrics:')
+ada_clf = tune_AdaBoost(ada_tuning_parameters, sss, bf_ada_recall, labels)
 test_classifier(ada_clf, my_dataset, bfl_ada_recall, folds = 1000)
 #print(xval_classifier(ada_clf, bf_ada_recall, labels, sss))
 
 
 # Tune RandomForest
-line()
-t = time()
-#rf_tuning_parameters = {'n_estimators': [90], 'min_samples_split': [3], 'max_features': [1]}
-rf_tuning_parameters = {'n_estimators': [80, 90, 100, 125], 
-                        'min_samples_split': [2, 4, 6], 'max_features': [1, 2, 3]}
-print('Beginning tuning RandomForest...')
-print('Please wait...')
-RF = GridSearchCV(RandomForestClassifier(), rf_tuning_parameters, cv = sss, scoring = 'recall')
-RF.fit(bf_rf_recall, labels)
-print('Best Parameters:')
-print(RF.best_params_)
-print('Time Spent Tuning RF: {0}s'.format(round(time() - t, 2)))
-
-rf_clf = RF.best_estimator_
-print('Tuned RandomForest Metrics:')
+rf_clf = tune_RandomForest(rf_tuning_parameters, sss, bf_rf_recall, labels)
 test_classifier(rf_clf, my_dataset, bfl_rf_recall, folds = 1000)
 #print(xval_classifier(rf_clf, bf_rf_recall, labels, sss))
 

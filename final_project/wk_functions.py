@@ -122,93 +122,32 @@ def best_features(max_feature, features, labels, features_list):
     return selected_features_list, selected_features
 
 
-def score_features(features, labels, sss, features_list):
-    print('Begin training AdaBoost and RandomForest Classifiers...')
+def tune_RandomForest(rf_tuning_parameters, sss, bf_rf_recall, labels):
+    line()
+    t = time()
+    print('Beginning tuning RandomForest...')
     print('Please wait...')
-    print('Training {0} Features...'.format(len(features_list) - 1))
-    line()
+    RF = GridSearchCV(RandomForestClassifier(), rf_tuning_parameters, cv = sss, scoring = 'recall')
+    RF.fit(bf_rf_recall, labels)
+    print('Best Parameters:')
+    print(RF.best_params_)
+    print('Time Spent Tuning RF: {0}s'.format(round(time() - t, 2)))
 
-    scores = []
-    ada_accuracy = []
-    ada_precision = []
-    ada_recall = []
-    rf_accuracy = []
-    rf_precision = []
-    rf_recall = []
+    rf_clf = RF.best_estimator_
+    print('Tuned RandomForest Metrics:')
+    return rf_clf
 
-    for i in range(len(features[0])):
-        t = time()
-        sel = SelectKBest(f_classif, k = i + 1)
-        sel.fit(features, labels)
-        reduced_features = sel.fit_transform(features, labels)
-        stop = np.sort(sel.scores_)[::-1][i]
-        selected_features_list = [f for j, f in enumerate(features_list[1:]) if sel.scores_[j] >= stop]
-        selected_features_list = ['poi'] + selected_features_list
-        
-        # Run metrics on AdaBoost Classifier
-        ada = AdaBoostClassifier(random_state = 666)
-        acc, prec, re = xval_classifier(ada, reduced_features, labels, sss)
-        ada_accuracy.append(round(float(acc), 2))
-        ada_precision.append(round(float(prec), 2))
-        ada_recall.append(round(float(re), 2))
 
-        # Run metrics on Random Forest Classifier
-        rf = RandomForestClassifier(random_state = 999)
-        acc, prec, re = xval_classifier(rf, reduced_features, labels, sss)
-        rf_accuracy.append(round(float(acc), 2))
-        rf_precision.append(round(float(prec), 2))
-        rf_recall.append(round(float(re), 2))
-        print('Feature:', features_list[i])
-        print('Time Spent Fitting k = {0}: {1}s'.format(i + 1, round(time() - t, 2)))
-        print('AdaBoost Metrics: \nAccuracy: {0}, Precision: {1}, Recall: {2}'.format(ada_accuracy[-1], 
-            ada_precision[-1], ada_recall[-1]))
-        print('RandomForest Metrics: \nAccuracy: {0}, Precision: {1}, Recall: {2}'.format(rf_accuracy[-1], 
-            rf_precision[-1], rf_recall[-1]))
-        scores.append({'k': str(i + 1), 'feature': features_list[i], 'ada_accuracy': ada_accuracy[-1], 
-                    'ada_precision': ada_precision[-1],  'ada_recall': ada_recall[-1], 
-                    'rf_accuracy': rf_accuracy[-1], 'rf_precision': rf_precision[-1], 
-                    'rf_recall': rf_recall[-1]})
-        if i < len(features[0]):
-            print('Please continue to wait...')
-            line()
-            
-    # Average scores from each feature to get an idea of how the classifiers compare overall
-    print('Average Scores For Each Classifier:')
+def tune_AdaBoost(ada_tuning_parameters, sss, bf_ada_recall, labels):
+    t = time()
+    print('Beginning tuning AdaBoost...')
+    print('Please wait...')
+    ADA = GridSearchCV(AdaBoostClassifier(), ada_tuning_parameters, cv = sss, scoring = 'recall')
+    ADA.fit(bf_ada_recall, labels)
+    print('Best Parameters:')
+    print(ADA.best_params_)
+    print('Time Spent Tuning AdaBoost: {0}s'.format(round(time() - t, 2)))
 
-    avg_ada_accuracy = [] 
-    avg_ada_precision = [] 
-    avg_ada_recall = []
-    avg_rf_accuracy = []
-    avg_rf_precision = []
-    avg_rf_recall = []
-
-    for k in scores:
-        avg_ada_accuracy.append(k['ada_accuracy'])
-        avg_ada_precision.append(k['ada_precision'])
-        avg_ada_recall.append(k['ada_recall'])
-        avg_rf_accuracy.append(k['rf_accuracy'])
-        avg_rf_precision.append(k['rf_precision'])
-        avg_rf_recall.append(k['rf_recall'])
-
-    print('Average AdaBoost Accuracy:', round(sum(avg_ada_accuracy) / len(avg_ada_accuracy), 2))
-    print('Average AdaBoost Precision:', round(sum(avg_ada_precision) / len(avg_ada_precision), 2))
-    print('Average AdaBoost Recall:', round(sum(avg_ada_recall) / len(avg_ada_recall), 2))
-    print('Average RandomForest Accuracy:', round(sum(avg_rf_accuracy) / len(avg_rf_accuracy), 2))
-    print('Average RandomForest Precision:', round(sum(avg_rf_precision) / len(avg_rf_precision), 2))
-    print('Average RandomForest Recall:', round(sum(avg_rf_recall) / len(avg_rf_recall), 2))
-    #line()
-    #print('Show score values for each feature')
-    #pprint.pprint(scores)
-
-    #Create plots to visualize what the scores of each feature look like
-    line()
-    print('Plot metrics for each classifier, showing the values of each k feature')
-    line()
-    ada_df = pd.DataFrame({'ada_accuracy': ada_accuracy, 'ada_precision': ada_precision, 
-            'ada_recall': ada_recall})
-    rf_df = pd.DataFrame({'rf_accuracy': rf_accuracy, 'rf_precision': rf_precision, 
-            'rf_recall': rf_recall})
-    ada_df.plot()
-    rf_df.plot()
-    #plt.show()
-    return ada_accuracy, ada_precision, ada_recall, rf_accuracy, rf_precision, rf_recall, sel
+    ada_clf = ADA.best_estimator_
+    print('Tuned AdaBoost Metrics:')
+    return ada_clf
